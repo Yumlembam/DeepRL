@@ -18,11 +18,7 @@ class ReplayBuffer(object):
         self.terminals = None
 
     def __len__(self):
-        if self.obs:
-            return self.obs.shape[0]
-        else:
-            return 0
-
+        return 0 if self.obs is None else self.obs.shape[0]
     def add_rollouts(self, paths, concat_rew=True):
 
         # add new rollouts into our list of rollouts
@@ -33,6 +29,7 @@ class ReplayBuffer(object):
         # our arrays
         observations, actions, rewards, next_observations, terminals = (
             convert_listofrollouts(paths, concat_rew))
+        print(observations.shape)
 
         if self.obs is None:
             self.obs = observations[-self.max_size:]
@@ -59,4 +56,15 @@ class ReplayBuffer(object):
             self.terminals = np.concatenate(
                 [self.terminals, terminals]
             )[-self.max_size:]
+    def sample_random_data(self, batch_size):
+        N = len(self)
+        assert N > 0, "ReplayBuffer is empty."
+        idxs = np.random.permutation(N)[:min(batch_size, N)]
+        obs_batch       = self.obs[idxs]
+        acs_batch       = self.acs[idxs]
+        # The rest are not needed for BC, but provided for completeness:
+        rews_batch      = None if isinstance(self.rews, list) else self.rews[idxs]
+        next_obs_batch  = self.next_obs[idxs]
+        terminals_batch = self.terminals[idxs]
+        return obs_batch, acs_batch, rews_batch, next_obs_batch, terminals_batch
 

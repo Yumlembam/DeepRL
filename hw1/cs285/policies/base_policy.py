@@ -1,5 +1,6 @@
 import abc
 import numpy as np
+from cs285.infrastructure import pytorch_util as ptu
 
 
 class BasePolicy(object, metaclass=abc.ABCMeta):
