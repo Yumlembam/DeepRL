@@ -59,9 +59,16 @@ class MLPPolicy(nn.Module):
     def get_action(self, obs: np.ndarray) -> np.ndarray:
         """Takes a single observation (as a numpy array) and returns a single action (as a numpy array)."""
         # TODO: implement get_action
-        action = None
-
-        return action
+        if self.discrete:
+            obs_t=ptu.from_numpy(obs[None])
+            dist= self.forward(obs_t)
+            action=dist.sample()
+            return int(ptu.to_numpy(action.squeeze(0)))
+        else:
+            obs_t=ptu.from_numpy(obs[None])
+            dist=self.forward(obs_t)
+            action=dist.sample()
+            return ptu.to_numpy(action.squeeze(0))
 
     def forward(self, obs: torch.FloatTensor):
         """
@@ -70,12 +77,15 @@ class MLPPolicy(nn.Module):
         flexible objects, such as a `torch.distributions.Distribution` object. It's up to you!
         """
         if self.discrete:
-            # TODO: define the forward pass for a policy with a discrete action space.
-            pass
+            logits=self.logits_net(obs)
+            dist=torch.distributions.Categorical(logits=logits)
+            return dist
         else:
             # TODO: define the forward pass for a policy with a continuous action space.
-            pass
-        return None
+            mean=self.mean_net(obs)
+            std=torch.exp(self.logstd)
+            dist=torch.distributions.Normal(mean,std)
+        return dist
 
     def update(self, obs: np.ndarray, actions: np.ndarray, *args, **kwargs) -> dict:
         """Performs one iteration of gradient descent on the provided batch of data."""
@@ -95,9 +105,19 @@ class MLPPolicyPG(MLPPolicy):
         obs = ptu.from_numpy(obs)
         actions = ptu.from_numpy(actions)
         advantages = ptu.from_numpy(advantages)
+        dist = self.forward(obs)
+        log_probs = dist.log_prob(actions.long() if self.discrete else actions)
+        if not self.discrete:
+            log_probs=log_probs.sum(dim=-1)
+        
+
 
         # TODO: implement the policy gradient actor update.
-        loss = None
+        loss = -(log_probs * advantages).mean()
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
 
         return {
             "Actor Loss": ptu.to_numpy(loss),
