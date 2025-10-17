@@ -7,6 +7,7 @@ import os
 import time
 
 import gym
+# import gymnasium as gym
 import numpy as np
 import torch
 from cs285.infrastructure import pytorch_util as ptu
@@ -70,15 +71,18 @@ def run_training_loop(args):
         print(f"\n********** Iteration {itr} ************")
         # TODO: sample `args.batch_size` transitions using utils.sample_trajectories
         # make sure to use `max_ep_len`
+        print("sampling trajectory")
+        t0 = time.time()
         trajs, envsteps_this_batch =utils.sample_trajectories(
             env, agent.actor, args.batch_size, max_ep_len
         )
+        print(f"[itr {itr}] sample_trajectories took {time.time()-t0:.3f}s; envsteps={envsteps_this_batch}")
         total_envsteps += envsteps_this_batch
 
         # trajs should be a list of dictionaries of NumPy arrays, where each dictionary corresponds to a trajectory.
         # this line converts this into a single dictionary of lists of NumPy arrays.
         trajs_dict = {k: [traj[k] for traj in trajs] for k in trajs[0]}
-
+        t1 = time.time()
         # TODO: train the agent using the sampled trajectories and the agent's update function
         train_info: dict = agent.update(
             trajs_dict["observation"],
@@ -86,7 +90,7 @@ def run_training_loop(args):
             trajs_dict["reward"],
             trajs_dict["terminal"],
         )
-
+        print(f"[itr {itr}] agent.update took {time.time()-t1:.3f}s")
         if itr % args.scalar_log_freq == 0:
             # save eval metrics
             print("\nCollecting data for eval...")

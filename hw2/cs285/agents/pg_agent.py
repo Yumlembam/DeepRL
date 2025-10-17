@@ -84,14 +84,14 @@ class PGAgent(nn.Module):
         # step 3: use all datapoints (s_t, a_t, adv_t) to update the PG actor/policy
         # TODO: update the PG actor/policy network once using the advantages
         actor_info: dict = self.actor.update(obs_flat, actions_flat, advantages)
-        info: dict = {"actor": actor_info}
+        info: dict = {"actor":  actor_info["Actor Loss"]}
 
         # step 4: if needed, use all datapoints (s_t, a_t, q_t) to update the PG critic/baseline
         if self.critic is not None:
             # TODO: perform `self.baseline_gradient_steps` updates to the critic/baseline network
             for _ in range(self.baseline_gradient_steps):
                 critic_info = self.critic.update(obs_flat, qvals_flat)
-            info["critic"] = critic_info   
+            info["critic"] = critic_info["Baseline Loss"]
 
         return info
 
@@ -112,6 +112,7 @@ class PGAgent(nn.Module):
 
         return q_values
 
+    # in PGAgent._estimate_advantage (drop-in replacement)
     def _estimate_advantage(
         self,
         obs: np.ndarray,
@@ -119,49 +120,45 @@ class PGAgent(nn.Module):
         q_values: np.ndarray,
         terminals: np.ndarray,
     ) -> np.ndarray:
-        """Computes advantages by (possibly) subtracting a value baseline from the estimated Q-values.
+        # Convert once to torch (on correct device)
+        obs_t       = ptu.from_numpy(obs)                   # only needed if you use critic
+        rewards_t   = ptu.from_numpy(rewards).float()
+        q_values_t  = ptu.from_numpy(q_values).float()
+        terminals_t = ptu.from_numpy(terminals).float()     # 1.0 if terminal else 0.0
 
-        Operates on flat 1D NumPy arrays.
-        """
         if self.critic is None:
-            # TODO: if no baseline, then what are the advantages?
-            advantages = q_values.copy()
+            adv_t = q_values_t.clone()
         else:
-            # TODO: run the critic and use it as a baseline
-            values = self.critic.forward_np(obs)
-            assert values.shape == q_values.shape
+            with torch.no_grad():
+                values_t = self.critic(obs_t).float()       # shape (N,)
 
             if self.gae_lambda is None:
-                # TODO: if using a baseline, but not GAE, what are the advantages?
-                advantages = q_values-values
+                # simple baseline: A = Q - V
+                adv_t = q_values_t - values_t
             else:
-                # TODO: implement GAE
-                batch_size = obs.shape[0]
+                # GAE(λ) with flat transitions & terminal flags
+                gamma = torch.tensor(self.gamma, device=ptu.device, dtype=torch.float32)
+                lam   = torch.tensor(self.gae_lambda, device=ptu.device, dtype=torch.float32)
 
-                # HINT: append a dummy T+1 value for simpler recursive calculation
-                values = np.append(values, [0])
-                advantages = np.zeros(batch_size + 1)
-    
-                gae=0.0
-                for i in reversed(range(batch_size)):
-                    # TODO: recursively compute advantage estimates starting from timestep T.
-                    # HINT: use terminals to handle edge cases. terminals[i] is 1 if the state is the last in its
-                    # trajectory, and 0 otherwise.
-                    
-                    nonterminal=1-terminals[i]
-                    delta=rewards[i]+self.gamma*values[i+1]*nonterminal-values[i]
-                    gae=delta+self.gamma*self.gae_lambda*gae*nonterminal
-                    advantages[i]=gae
+                # Append dummy value for t = N (value_{N} = 0) to simplify indexing
+                values_pad = torch.cat([values_t, torch.zeros(1, device=ptu.device)])
+                adv_t = torch.zeros_like(q_values_t)
+                gae = torch.tensor(0.0, device=ptu.device)
 
-                # remove dummy advantage
-                
-                advantages = np.asarray(advantages[:-1], dtype=np.float32)
+                # Compute deltas from rewards + V(s')
+                # Here we don’t have next-state values directly, so we use the padded V
+                # Terminals_t[i] == 1 → nonterminal = 0 → reset GAE at episode boundaries
+                for i in range(q_values_t.numel() - 1, -1, -1):
+                    nonterminal = 1.0 - terminals_t[i]
+                    delta = rewards_t[i] + gamma * values_pad[i + 1] * nonterminal - values_pad[i]
+                    gae = delta + gamma * lam * gae * nonterminal
+                    adv_t[i] = gae
 
-        # TODO: normalize the advantages to have a mean of zero and a standard deviation of one within the batch
         if self.normalize_advantages:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            adv_t = (adv_t - adv_t.mean()) / (adv_t.std() + 1e-8)
 
-        return advantages
+        return ptu.to_numpy(adv_t)  # keep your existing interface
+
 
     def _discounted_return(self, rewards: Sequence[float]) -> Sequence[float]:
         """

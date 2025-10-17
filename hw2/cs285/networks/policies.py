@@ -120,5 +120,5 @@ class MLPPolicyPG(MLPPolicy):
 
 
         return {
-            "Actor Loss": ptu.to_numpy(loss),
+            "Actor Loss": float(loss.detach().cpu().item()),
         }
