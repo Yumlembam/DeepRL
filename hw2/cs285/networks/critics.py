@@ -39,6 +39,7 @@ class ValueCritic(nn.Module):
         v=self.network(obs)
         v=v.squeeze(-1)
         return v
+    
         
 
     def update(self, obs: np.ndarray, q_values: np.ndarray) -> dict:
